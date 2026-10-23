@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Turf Cricket Pro</title>
+  <meta name="description" content="Live cricket scoring for turf matches — teams, toss, one-tap scoring, scorecards and history.">
+  <meta name="theme-color" content="#0b1426">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Turf Cricket">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a class="skip" href="#view">Skip to content</a>
+  <main id="view" tabindex="-1" aria-live="polite"></main>
+
+  <nav class="bottom-nav" aria-label="Main">
+    <a href="#/" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
+    <a href="#/live" data-nav="live"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke-width="2"/><path d="M7 6.5c2.5 3 2.5 8 0 11M17 6.5c-2.5 3-2.5 8 0 11" fill="none" stroke-width="1.6"/></svg><span>Score</span><i class="live-dot" hidden></i></a>
+    <a href="#/teams" data-nav="teams"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.8"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6zM15.5 20c0-2.2-.6-3.9-1.7-5.1.9-.6 2-.9 3.2-.9 2.9 0 4.5 2 4.5 6z"/></svg><span>Teams</span></a>
+    <a href="#/history" data-nav="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5z" fill="none" stroke-width="2"/><path d="M8 9h8M8 13h8M8 17h5" fill="none" stroke-width="2"/></svg><span>History</span></a>
+    <a href="#/stats" data-nav="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V11h3.5v9zM10.25 20V5h3.5v15zM16.5 20v-6H20v6z"/></svg><span>Stats</span></a>
+  </nav>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <div id="flash" class="flash" aria-hidden="true"></div>
+
+  <noscript><p style="padding:24px;color:#fff">Turf Cricket Pro needs JavaScript enabled.</p></noscript>
+  <script src="js/engine.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
