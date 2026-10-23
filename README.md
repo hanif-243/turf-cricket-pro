@@ -15,6 +15,11 @@ A mobile-first live cricket scoring app for friendly turf matches. It's a static
 - **Scorecard**: batting, bowling, extras, fall of wickets, partnerships, best batter and best bowler, and a Player of the Match picker.
   - **Sharing**: share text, copy the full scorecard, a 1080×1350 scorecard image, CSV export, a match file (JSON), and Rematch.
 - **History and statistics**: every match is saved after each ball. Stats cover team W/L/win %, highest total, highest score, best bowling, most runs, wickets, fours and sixes, top-5 lists, and head-to-head.
+- **Player photos and team logos**: take a photo or pick one from the gallery in Teams (tap the avatar or badge) or from any player's profile. Photos are centre-cropped and compressed to about 4 KB each, stored on the phone, and included in backups. They appear on the live screen, the batter/bowler pickers, scorecards, Player of the Match, milestone celebrations and the share image.
+- **Player profiles**: tap any name on a scorecard for career stats, recent form, photo and rename (fixes a typo in that match and the saved team without touching scores).
+- **Milestones**: celebrations with the player's photo for fifties, hundreds, 3- and 5-wicket hauls, hat-tricks and maiden overs.
+- **Report tab**: worm chart comparing both innings, a Manhattan chart (runs per over with wickets) per innings, and an over-by-over list.
+- **At the ground**: the screen stays on while scoring (Screen Wake Lock, can be turned off in Settings), a coin-flip toss, a projected score in the first innings, and the font is cached for offline use.
 - **Backup**: export or import all data as JSON (Home → ⚙). Use this to move matches to another phone.
 
 ## File structure

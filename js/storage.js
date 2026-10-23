@@ -15,8 +15,9 @@
     match: 'tcp.match.v1.',
     current: 'tcp.current.v1',
     settings: 'tcp.settings.v1',
+    photos: 'tcp.photos.v1',
   };
-  const DEFAULT_SETTINGS = { sound: true, vibrate: true };
+  const DEFAULT_SETTINGS = { sound: true, vibrate: true, wakeLock: true, lastBackup: null };
 
   function create(backend) {
     function read(key, fallback) {
@@ -86,6 +87,15 @@
       getSettings() { return Object.assign({}, DEFAULT_SETTINGS, read(K.settings, {})); },
       saveSettings(s) { write(K.settings, s); },
 
+      // ----- photos: small JPEG data URLs keyed by player id, or 't:<teamId>' for team logos -----
+      getPhotos() { return read(K.photos, {}); },
+      setPhoto(key, dataUrl) {
+        const all = api.getPhotos();
+        if (dataUrl) all[key] = dataUrl; else delete all[key];
+        write(K.photos, all);
+        return all;
+      },
+
       // ----- backup -----
       exportAll() {
         return {
@@ -94,6 +104,7 @@
           exportedAt: new Date().toISOString(),
           teams: api.getTeams(),
           matches: api.getAllMatches(),
+          photos: api.getPhotos(),
         };
       },
       // Merges by id: imported records replace local ones with the same id.
@@ -106,11 +117,12 @@
         });
         data.teams.forEach(t => { if (t && t.id && t.name) api.saveTeam(t); });
         data.matches.forEach(m => api.saveMatch(m));
+        if (data.photos && typeof data.photos === 'object') write(K.photos, Object.assign(api.getPhotos(), data.photos));
         return { teams: data.teams.length, matches: data.matches.length };
       },
       clearAll() {
         api.getMatchIndex().forEach(x => backend.removeItem(K.match + x.id));
-        [K.teams, K.index, K.current].forEach(k => backend.removeItem(k));
+        [K.teams, K.index, K.current, K.photos].forEach(k => backend.removeItem(k));
       },
     };
     return api;

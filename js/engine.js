@@ -103,7 +103,7 @@
       const ids = players.map(p => p.id);
       return {
         name,
-        color: t.color || (i ? '#e5383b' : '#1f9d55'),
+        color: t.color || (i ? '#7c3aed' : '#1f9d55'),
         savedTeamId: t.savedTeamId || null,
         captain: ids.includes(t.captain) ? t.captain : null,
         keeper: ids.includes(t.keeper) ? t.keeper : null,
@@ -451,7 +451,7 @@
 
     inn.deliveries.push({
       id: e.id || null, over: Math.floor(ballsBefore / 6), legal, kind, runs, teamRuns, batRuns,
-      wicket: !!w, out: outId, bowler: bowlerId, striker: strikerId,
+      wicket: !!w, wkind: w ? w.kind : null, out: outId, bowler: bowlerId, striker: strikerId,
       boundary: !!(batRuns && boundary),
       label: ballLabel(kind, runs, teamRuns, nbType, w),
     });

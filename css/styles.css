@@ -13,7 +13,7 @@
   --accent: #ffad0d;
   --accent-ink: #3a2700;
   --four: #0d47c5;
-  --six: #ff9500;
+  --six: #e06c00;
   --danger: #e5383b;
   --ok: #1f9d55;
   --radius: 18px;
@@ -86,6 +86,15 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 /* round team badge (like a flag) */
 .flag { width: 36px; height: 36px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; letter-spacing: .3px; background: var(--c, var(--brand)); color: var(--fc, #fff); box-shadow: 0 3px 8px rgba(17, 38, 92, .18); }
 .flag.sm { width: 28px; height: 28px; font-size: 11px; }
+img.flag { object-fit: cover; background: #fff; }
+/* player avatar: photo or initials on a soft tint of the team colour */
+.ava { width: 40px; height: 40px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; background: color-mix(in srgb, var(--c, var(--brand)) 16%, #fff); color: color-mix(in srgb, var(--c, var(--brand)) 80%, #1b2236); object-fit: cover; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(17, 38, 92, .15); }
+.ava.sm { width: 28px; height: 28px; font-size: 10px; border-width: 1.5px; }
+.ava.md { width: 36px; height: 36px; font-size: 12px; }
+.ava.lg { width: 64px; height: 64px; font-size: 20px; border-width: 3px; }
+.ava.xl { width: 96px; height: 96px; font-size: 30px; border-width: 4px; }
+button.ava-btn { position: relative; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 50%; flex: none; }
+button.ava-btn::after { content: "📷"; position: absolute; right: -4px; bottom: -4px; width: 22px; height: 22px; border-radius: 50%; background: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 11px; box-shadow: 0 2px 6px rgba(17, 38, 92, .25); }
 .vs { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 18px; border-radius: 5px; background: var(--row); color: var(--dim); font-size: 10px; font-weight: 600; }
 
 /* ---------- buttons ---------- */
@@ -140,6 +149,23 @@ input[type=color] { width: 56px; height: 48px; border: 1px solid var(--line); bo
 .tabs { display: flex; background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden; }
 .tabs button { flex: 1; min-width: 0; min-height: 56px; border: 0; background: transparent; color: var(--text); font-size: 16px; font-weight: 500; cursor: pointer; position: relative; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabs button.on { color: var(--brand); font-weight: 600; }
+.tabs button { font-size: 15px; }
+/* report charts */
+.chart-card svg { display: block; margin-top: 6px; touch-action: manipulation; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--text); margin-bottom: 2px; }
+.lg-item { display: inline-flex; align-items: center; gap: 6px; }
+.chart-tip { min-height: 18px; margin-top: 4px; }
+.over-list { margin: 10px -16px -16px; }
+.ov-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--row); border-top: 1px solid #edf0f6; }
+.ov-no { width: 44px; flex: none; font-weight: 600; font-size: 13px; }
+.ov-mid { flex: 1; min-width: 0; }
+.ov-mid .ball { min-width: 26px; height: 26px; font-size: 11px; }
+.ov-sum { text-align: right; flex: none; }
+.ov-sum b { display: block; font-size: 17px; }
+.ov-sum small { color: var(--muted); font-size: 12px; }
+table.sc .nm { display: flex; }
+table.sc .sc-name .ava { flex: none; }
+table.sc .sc-name span { overflow: hidden; text-overflow: ellipsis; }
 .tabs button.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--brand); }
 
 /* ---------- match cards (Live Match / Result) ---------- */
@@ -242,6 +268,8 @@ div.live { display: flex; flex-direction: column; gap: 12px; }
 .choice { min-height: 54px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--row); color: var(--brand); text-align: left; cursor: pointer; font-weight: 600; font-size: 15px; display: flex; flex-direction: column; justify-content: center; }
 .choice small { color: var(--muted); font-weight: 400; font-size: 12px; }
 .choice[disabled] { opacity: .45; cursor: not-allowed; color: var(--muted); }
+.choice.with-ava { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
+.choice.with-ava > span:last-child { display: flex; flex-direction: column; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .choice.sel { border-color: var(--brand); background: var(--brand-tint); }
 .result-card { text-align: center; padding: 22px 16px; }
 .result-card .trophy { font-size: 42px; }
@@ -288,8 +316,15 @@ table.sc tr.tot td { font-weight: 700; border-bottom: 0; }
 .potm .big { width: 64px; height: 64px; font-size: 20px; margin-left: auto; }
 
 /* ---------- teams ---------- */
-.player-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.player-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.player-row .pr-top { display: flex; align-items: center; gap: 10px; }
+.player-row .pr-tags { display: flex; gap: 6px; margin: 8px 0 0 54px; }
 .player-row input[type=text] { flex: 1; min-width: 0; min-height: 44px; }
+.tog.wide { padding: 0 12px; font-weight: 600; color: var(--brand); }
+.profile-head { display: flex; align-items: center; gap: 16px; }
+.profile-head .pn { font-size: 22px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-name { background: none; border: 0; padding: 0; font: inherit; color: var(--brand); font-weight: 500; cursor: pointer; text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; min-height: 28px; }
+.flag.xl { width: 96px; height: 96px; font-size: 30px; }
 .tog { min-width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--dim); font-weight: 700; font-size: 13px; cursor: pointer; flex: none; padding: 0 6px; }
 .tog.on { background: var(--brand-tint); color: var(--brand); border-color: #bcd0f5; }
 .tog.del { color: var(--danger); }
@@ -347,6 +382,10 @@ table.sc tr.tot td { font-weight: 700; border-bottom: 0; }
 .flash .f6 { color: #fff; background: var(--six); }
 .flash .fw { color: #fff; background: var(--danger); }
 .flash .fi { color: var(--brand); background: #fff; font-size: 32px; }
+.flash .fm { color: #fff; background: linear-gradient(160deg, var(--brand), #1152d6); font-size: 34px; }
+.flash .with-ava { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 30px; }
+.flash .with-ava b { font-weight: 800; }
+.flash .with-ava small { font-size: 18px; font-weight: 500; letter-spacing: 0; opacity: .9; }
 @keyframes pop { 0% { transform: scale(.6); opacity: 0; } 18% { transform: scale(1.06); opacity: 1; } 70% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.04); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
@@ -366,3 +405,11 @@ table.sc tr.tot td { font-weight: 700; border-bottom: 0; }
   .pad .k { min-height: 54px; }
   .crease .p { min-height: 36px; }
 }
+
+/* coin toss & backup nudge */
+.coin-out { min-height: 22px; margin: -4px 0 10px; font-size: 14px; color: var(--text); }
+.coin { display: inline-block; font-size: 22px; vertical-align: middle; }
+.coin.spin { animation: flip .35s linear infinite; }
+@keyframes flip { 0% { transform: rotateY(0); } 100% { transform: rotateY(360deg); } }
+.backup-nudge { border-left: 4px solid var(--accent); }
+.backup-nudge b { font-weight: 600; }

@@ -364,5 +364,27 @@ test('CSV and text exports include the result', () => {
   assert.ok(E.scorecardText(st, { potm: 'a1' }).includes('Player of the Match: A1'));
 });
 
+section('Photos and new fields');
+test('each delivery records its dismissal kind (for hat-trick detection)', () => {
+  const m = mk(); const st = push(m, start(), out('bowled'), batter('a3'), ball(1, { wicket: { kind: 'run out', out: 'a2' } }));
+  const d = inn(st).deliveries;
+  assert.strictEqual(d[0].wkind, 'bowled'); assert.strictEqual(d[1].wkind, 'run out');
+});
+test('default team colours are green and purple (colour-blind safe)', () => {
+  const t = (name, pre) => ({ name, players: [1, 2].map(i => ({ id: pre + i, name: pre + i })) });
+  const m = E.createMatch({ overs: 2, playersPerSide: 2, teams: [t('A', 'x'), t('B', 'y')], toss: { winner: 0, decision: 'bat' } });
+  assert.deepStrictEqual(m.config.teams.map(x => x.color), ['#1f9d55', '#7c3aed']);
+});
+test('photos are stored separately and survive backup export / import', () => {
+  const mk2 = () => { const mem = {}; return S.create({ getItem: k => (k in mem ? mem[k] : null), setItem: (k, v) => { mem[k] = String(v); }, removeItem: k => { delete mem[k]; } }); };
+  const a = mk2(), b = mk2();
+  a.setPhoto('p1', 'data:image/jpeg;base64,AAA'); a.setPhoto('t:team1', 'data:image/jpeg;base64,BBB');
+  a.setPhoto('p2', 'data:x'); a.setPhoto('p2', null);
+  assert.deepStrictEqual(Object.keys(a.getPhotos()).sort(), ['p1', 't:team1']);
+  b.importAll(JSON.parse(JSON.stringify(a.exportAll())));
+  assert.strictEqual(b.getPhotos().p1, 'data:image/jpeg;base64,AAA');
+  b.clearAll(); assert.deepStrictEqual(b.getPhotos(), {});
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

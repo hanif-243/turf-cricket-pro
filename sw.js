@@ -1,5 +1,5 @@
 /* Turf Cricket Pro — offline cache. Bump CACHE when shipping new files. */
-const CACHE = 'tcp-v2';
+const CACHE = 'tcp-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -31,7 +31,17 @@ self.addEventListener('activate', event => {
 // Stale-while-revalidate: open instantly from cache (works offline), refresh in the background.
 self.addEventListener('fetch', event => {
   const req = event.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // Google Fonts: cache-first so the app font also works offline at the ground.
+  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
+    event.respondWith(caches.open(CACHE).then(cache => cache.match(req).then(hit => hit || fetch(req).then(res => {
+      if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
+      return res;
+    }))));
+    return;
+  }
+  if (url.origin !== self.location.origin) return;
   event.respondWith(
     caches.open(CACHE).then(cache => cache.match(req, { ignoreSearch: true }).then(cached => {
       const network = fetch(req).then(res => {
