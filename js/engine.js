@@ -103,7 +103,7 @@
       const ids = players.map(p => p.id);
       return {
         name,
-        color: t.color || (i ? '#3fb6ff' : '#b6f23b'),
+        color: t.color || (i ? '#e5383b' : '#1f9d55'),
         savedTeamId: t.savedTeamId || null,
         captain: ids.includes(t.captain) ? t.captain : null,
         keeper: ids.includes(t.keeper) ? t.keeper : null,

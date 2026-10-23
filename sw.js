@@ -1,5 +1,5 @@
 /* Turf Cricket Pro — offline cache. Bump CACHE when shipping new files. */
-const CACHE = 'tcp-v1';
+const CACHE = 'tcp-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -14,7 +14,10 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's HTTP cache, so a new version never installs stale files.
+  event.waitUntil(caches.open(CACHE)
+    .then(cache => cache.addAll(ASSETS.map(url => new Request(url, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {

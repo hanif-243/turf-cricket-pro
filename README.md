@@ -22,7 +22,7 @@ A mobile-first live cricket scoring app for friendly turf matches. It's a static
 ```
 turf-cricket-pro/
 ├── index.html             App shell + bottom navigation
-├── css/styles.css         Mobile-first theme (navy / turf green / lime)
+├── css/styles.css         Mobile-first light theme (royal-blue header band, white cards)
 ├── js/engine.js           Scoring engine: pure, no DOM, runs in browser and Node
 ├── js/storage.js          localStorage persistence (one key per match + index)
 ├── js/app.js              UI: router, screens, dialogs, exports

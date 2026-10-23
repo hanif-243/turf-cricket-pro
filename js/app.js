@@ -54,9 +54,26 @@
   function slug(s) { return String(s || 'match').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'match'; }
   function isActive(st) { return !!st && st.status !== 'complete' && st.status !== 'abandoned'; }
   function hasBalls(m) { return m.events.some(e => e.type !== 'start_innings' && e.type !== 'set_bowler'); }
+  function initials(name) {
+    const w = String(name || '?').trim().split(/\s+/);
+    return (w.length > 1 ? w[0][0] + w[1][0] : w[0].slice(0, 2)).toUpperCase();
+  }
+  // Dark text on light team colours, white text on dark ones.
+  function inkFor(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return '#fff';
+    const n = parseInt(m[1], 16);
+    return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.62 ? '#1b2236' : '#fff';
+  }
+  function flag(team, cls) {
+    const c = team.color || '#0d47c5';
+    return `<span class="flag ${cls || ''}" style="--c:${esc(c)};--fc:${inkFor(c)}" aria-hidden="true">${esc(initials(team.name))}</span>`;
+  }
+  // Main (non super over) innings of a team, if it has batted.
+  function teamInnings(st, ti) { return st.innings.find(i => i.started && !i.isSuper && i.battingTeam === ti) || null; }
 
   const ICON = {
-    logo: '<svg class="brand-logo" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="#1f9d55"/><circle cx="24" cy="24" r="13" fill="#b6f23b"/><path d="M15.5 14.5c4 5 4 14 0 19M32.5 14.5c-4 5-4 14 0 19" fill="none" stroke="#0b1426" stroke-width="2.2" stroke-dasharray="2.6 2.2"/></svg>',
+    logo: '<svg class="brand-logo" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="14" fill="#fff"/><circle cx="24" cy="24" r="14" fill="#0d47c5"/><path d="M15 14.5c4.2 5 4.2 14 0 19M33 14.5c-4.2 5-4.2 14 0 19" fill="none" stroke="#fff" stroke-width="2.2" stroke-dasharray="2.6 2.2"/><circle cx="35" cy="13" r="4" fill="#ffad0d"/></svg>',
     gear: '<svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1l.4 2.6h4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>',
     soundOn: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="2" fill="none"/><path d="M4 9h4l5-4v14l-5-4H4z"/></svg>',
     soundOff: '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>',
@@ -347,6 +364,32 @@
     return entries;
   }
 
+  // "Live Match" / "Result" card: two team lines with badge, score and overs.
+  function matchCardHTML(st, o) {
+    const cfg = st.config;
+    const cur = st.innings[st.current];
+    const live = isActive(st) && cur.started;
+    const decided = st.status === 'complete' && st.result && st.result.winner != null;
+    const first = st.innings[0].battingTeam;
+    const line = ti => {
+      const t = cfg.teams[ti];
+      const inn = teamInnings(st, ti);
+      const batting = live && cur.battingTeam === ti;
+      const bowling = live && cur.bowlingTeam === ti;
+      const cls = decided ? (st.result.winner === ti ? 'win' : 'lose') : (batting ? 'bat' : '');
+      const score = inn
+        ? `${inn.runs}/${inn.wickets}<small>(${E.oversStr(inn.legalBalls)}/${inn.maxOvers} ov${inn.target != null ? `, target ${inn.target}` : ''})</small>`
+        : '<small>Yet to bat</small>';
+      return `<div class="team-line">${flag(t)}
+        <span class="tn ${cls}">${esc(t.name)}${batting ? ' <span class="bat-ico" title="Batting">🏏</span>' : ''}${bowling ? '<span class="bowl-ico" title="Bowling"></span>' : ''}</span>
+        <span class="ts ${cls === 'lose' ? 'lose' : ''}">${score}</span></div>`;
+    };
+    return `<div class="mc-head"><h2>${esc(o.title)}</h2>${o.pill || ''}</div>
+      <div class="mc-sub">${esc(o.sub || '')}</div>
+      ${line(first)}<div class="vs-row"><span class="vs">vs</span></div>${line(1 - first)}
+      ${o.result ? `<div class="mc-result">${esc(o.result)}</div>` : ''}`;
+  }
+
   function scoreLinesFromSummary(s) {
     if (!s) return '';
     return s.innings.map(i => `${esc(s.teams[i.team].name)}${i.isSuper ? ' (SO)' : ''} ${i.runs}/${i.wickets} (${i.overs})`).join(' · ');
@@ -378,36 +421,38 @@
     if (live) {
       const inn = live.innings[live.current];
       const c = E.chase(inn);
-      const lines = live.innings.filter(i => i.started).map(i => {
-        const t = live.config.teams[i.battingTeam];
-        return `<div class="tline"><span class="dot" style="background:${esc(t.color)}"></span>${esc(t.name)}${i.isSuper ? ' <small>(SO)</small>' : ''}<b>${i.runs}/${i.wickets} <small>(${E.oversStr(i.legalBalls)})</small></b></div>`;
-      }).join('');
-      const status = live.status === 'innings_break' ? 'Innings break' : (c && inn.started ? `Need ${c.need} from ${plural(c.ballsLeft, 'ball')}` : (inn.started ? `CRR ${fmt2(E.rate(inn.runs, inn.legalBalls))}` : 'Waiting for openers'));
-      liveCard = `<section class="card live-card" aria-label="Live match">
-        <div class="row"><span class="pill live">${app.match && app.match.paused ? 'PAUSED' : 'LIVE'}</span><span class="small muted grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(live.config.name)}</span></div>
-        <div class="teams">${lines || `<div class="muted">${esc(live.config.teams[0].name)} vs ${esc(live.config.teams[1].name)}</div>`}</div>
-        <div class="small" style="margin-bottom:12px;color:var(--lime);font-weight:700">${esc(status)}</div>
-        <a class="btn primary block lg" href="#/live">Resume scoring</a></section>`;
+      const status = live.status === 'innings_break' ? 'Innings break' : (c && inn.started ? `Need ${c.need} from ${plural(c.ballsLeft, 'ball')}` : (inn.started ? `Run rate ${fmt2(E.rate(inn.runs, inn.legalBalls))}` : 'Waiting for openers'));
+      liveCard = `<section class="card" aria-label="Live match">
+        ${matchCardHTML(live, {
+          title: 'Live Match',
+          pill: `<span class="pill live">${app.match && app.match.paused ? 'Paused' : 'Live'}</span>`,
+          sub: [live.config.name, live.config.venue].filter(Boolean).join(' · '),
+          result: status,
+        })}
+        <a class="btn primary block lg" href="#/live" style="margin-top:14px">Resume scoring</a></section>`;
     }
 
     const recent = idx.slice(0, 5).map(matchRowHTML).join('');
     view().innerHTML = `
       <header class="topbar"><div class="brand">${ICON.logo}<h1>Turf Cricket <b>Pro</b><span class="sub">Live scoring for turf matches</span></h1></div>
         <a class="icon-btn" href="#/settings" aria-label="Settings and backup">${ICON.gear}</a></header>
-      ${storageOk ? '' : '<div class="card" style="border-color:var(--danger)"><b>Storage is blocked.</b> <span class="muted small">This browser (private mode?) won’t keep your data after you close it.</span></div>'}
+      ${storageOk ? '' : '<div class="card"><b style="color:var(--danger)">Storage is blocked.</b> <span class="muted small">This browser (private mode?) won’t keep your data after you close it.</span></div>'}
       ${liveCard}
-      <a class="btn ${live ? 'turf' : 'primary'} block lg" href="#/new" style="margin-bottom:12px">${ICON.plus.replace('<svg', '<svg width="22" height="22" fill="currentColor"')} Start New Match</a>
-      <nav class="quick" aria-label="Sections">
-        <a href="#/teams">${ICON.teams}Manage Teams</a>
-        <a href="#/history">${ICON.history}Match History</a>
-        <a href="#/stats">${ICON.stats}Statistics</a>
-      </nav>
+      <section class="card">
+        ${live ? '' : '<div class="mc-head"><h2>Ready to play?</h2></div><div class="mc-sub">Teams, toss and overs — set up a match in under a minute.</div>'}
+        <a class="btn ${live ? '' : 'primary'} block lg" href="#/new">${ICON.plus.replace('<svg', '<svg width="22" height="22" fill="currentColor"')} Start New Match</a>
+        <nav class="quick" aria-label="Sections" style="margin-top:12px">
+          <a href="#/teams">${ICON.teams}Manage Teams</a>
+          <a href="#/history">${ICON.history}Match History</a>
+          <a href="#/stats">${ICON.stats}Statistics</a>
+        </nav>
+      </section>
       <div class="kpis">
         <div class="kpi"><b>${done.length}</b><span>Matches played</span></div>
         <div class="kpi"><b>${teams.length}</b><span>Saved teams</span></div>
         <div class="kpi"><b>${idx.length - done.length}</b><span>In progress</span></div>
       </div>
-      ${winsByTeam.length ? `<h2 class="section-title">Wins by team</h2><div class="card">${winsByTeam.map(r => `<div class="kv"><span><span class="dot" style="background:${esc(r.t.color || '#b6f23b')};margin-right:8px"></span>${esc(r.t.name)}</span><span><b>${r.w}</b> W · ${r.l} L · ${r.p} P</span></div>`).join('')}</div>` : ''}
+      ${winsByTeam.length ? `<h2 class="section-title">Wins by team</h2><div class="card">${winsByTeam.map(r => `<div class="kv" style="align-items:center"><span style="display:flex;align-items:center;gap:10px">${flag(r.t, 'sm')}${esc(r.t.name)}</span><span><b>${r.w}</b> W · ${r.l} L · ${r.p} P</span></div>`).join('')}</div>` : ''}
       <h2 class="section-title">Recent matches</h2>
       ${recent ? `<div class="list">${recent}</div>` : '<div class="card empty"><b>No matches yet</b>Create your teams, then tap Start New Match.</div>'}`;
   }
@@ -542,7 +587,7 @@
 
   function teamBlockHTML(i, base, teams) {
     const bt = base && base.teams[i];
-    const color = (bt && bt.color) || (i ? '#3fb6ff' : '#b6f23b');
+    const color = (bt && bt.color) || (i ? '#e5383b' : '#1f9d55');
     return `<section class="card" aria-label="Team ${i ? 'B' : 'A'}">
       <h2><span class="dot" id="t${i}-dot" style="background:${esc(color)}"></span> Team ${i ? 'B' : 'A'}</h2>
       <label class="field"><span>Choose a saved team</span><select id="t${i}-saved"><option value="">+ New team (type below)</option>
@@ -570,7 +615,7 @@
     const saved = S.teams.find(t => t.id === id) || null;
     if (saved) {
       $(`#t${i}-name`).value = saved.name;
-      $(`#t${i}-color`).value = saved.color || (i ? '#3fb6ff' : '#b6f23b');
+      $(`#t${i}-color`).value = saved.color || (i ? '#e5383b' : '#1f9d55');
       const pps = readNum('m-pps', 'm-pps-c');
       const xi = (saved.defaultXI || []).filter(pid => saved.players.some(p => p.id === pid));
       renderRoster(i, saved, xi.length ? xi : saved.players.slice(0, pps || saved.players.length).map(p => p.id));
@@ -771,13 +816,16 @@
     const p = inn.partnerships[inn.partnerships.length - 1];
     const label = inn.isSuper ? 'Super Over' : (inn.index === 0 ? '1st innings' : '2nd innings');
     const fh = inn.freeHit && st.config.rules.freeHit && !inn.complete;
+    const other = st.config.teams[inn.bowlingTeam];
+    const otherInn = prev || null;
     return `<section class="card scoreboard" aria-label="Scoreboard">
-      <div class="sb-team"><span class="dot" style="background:${esc(t.color)}"></span><span>${esc(t.name)}</span><span class="pill">${label}</span></div>
-      <div class="sb-main"><span class="sb-score" aria-label="${inn.runs} for ${inn.wickets}">${inn.runs}/${inn.wickets}</span>
-        <span class="sb-overs">${E.oversStr(inn.legalBalls)} <small>/ ${inn.maxOvers} ov</small></span></div>
+      <div class="sb-main">${flag(t)}
+        <span class="tn">${esc(t.name)} <span class="bat-ico" title="Batting">🏏</span>
+          <small class="sb-vs"><span class="pill ${inn.complete ? '' : 'live'}">${label}</span> vs ${esc(other.name)}${otherInn ? ` · ${otherInn.runs}/${otherInn.wickets}` : ''}</small></span>
+        <div><div class="sb-score" aria-label="${inn.runs} for ${inn.wickets}">${inn.runs}/${inn.wickets}</div>
+        <div class="sb-overs">${E.oversStr(inn.legalBalls)} / ${inn.maxOvers} ov</div></div></div>
       <div class="sb-meta"><span>CRR <b>${fmt2(E.rate(inn.runs, inn.legalBalls))}</b></span><span>Extras <b>${E.extrasTotal(inn)}</b></span>
-        ${p && p.open ? `<span>P'ship <b>${p.runs} (${p.balls})</b></span>` : ''}
-        ${prev ? `<span>${esc(st.config.teams[prev.battingTeam].name)} <b>${prev.runs}/${prev.wickets}</b></span>` : ''}</div>
+        ${p && p.open ? `<span>P'ship <b>${p.runs} (${p.balls})</b></span>` : ''}</div>
       ${c ? `<div class="sb-chase">Need <b>${c.need}</b> run${c.need === 1 ? '' : 's'} from <b>${c.ballsLeft}</b> ball${c.ballsLeft === 1 ? '' : 's'}
         <span class="small">Target ${c.target} · Req. rate ${c.rrr == null ? '—' : fmt2(c.rrr)}</span></div>` : ''}
       ${fh ? '<div style="margin-top:8px"><span class="pill warn">FREE HIT</span></div>' : ''}
@@ -810,16 +858,16 @@
       return `<div class="p"><span class="role" aria-hidden="true">${onStrike ? '▶' : ''}</span>
         <span class="nm ${onStrike ? 'on' : ''}">${esc(b.name)}${onStrike ? ' *' : ''}</span>
         <span class="fig">${b.runs} <span class="muted small">(${b.balls})</span></span>
-        <span class="ex">${b.fours}×4 ${b.sixes}×6 · SR ${Math.round(E.strikeRate(b.runs, b.balls))}</span></div>`;
+        <span class="ex">${b.fours} · ${b.sixes} · ${Math.round(E.strikeRate(b.runs, b.balls))}</span></div>`;
     };
     const bid = inn.bowler || inn.lastOverBowler;
     const bw = bid ? inn.bowlers[bid] : null;
     const p = inn.partnerships[inn.partnerships.length - 1];
     return `<section class="card crease" aria-label="At the crease">
+      <div class="hd"><span>Batters</span><span>R (B)</span><span style="min-width:78px;text-align:right">4s · 6s · SR</span></div>
       ${batRow(inn.striker, true)}${inn.nonStriker || !inn.striker || availableCount(st, inn) ? batRow(inn.nonStriker, false) : ''}
-      ${bw ? `<div class="p"><span class="role" aria-hidden="true">◉</span><span class="nm">${esc(bw.name)}${inn.bowler ? '' : ' <span class="muted small">(last over)</span>'}</span>
-        <span class="fig">${E.oversShort(bw.balls)}-${bw.maidens}-${bw.runs}-${bw.wickets}</span><span class="ex">Econ ${fmt2(E.rate(bw.runs, bw.balls))}</span></div>` : ''}
-      ${p && p.open && p.batters.length === 2 ? `<div class="pship">Partnership ${p.runs} (${p.balls}) · ${esc(st.names[p.batters[0]])} ${p.contrib[p.batters[0]] || 0}, ${esc(st.names[p.batters[1]])} ${p.contrib[p.batters[1]] || 0}</div>` : ''}
+      ${bw ? `<div class="hd"><span>Bowler</span><span>O-M-R-W</span><span style="min-width:78px;text-align:right">Econ</span></div><div class="p"><span class="role" aria-hidden="true">◉</span><span class="nm">${esc(bw.name)}${inn.bowler ? '' : ' <span class="muted small">(last over)</span>'}</span>
+        <span class="fig">${E.oversShort(bw.balls)}-${bw.maidens}-${bw.runs}-${bw.wickets}</span><span class="ex">${fmt2(E.rate(bw.runs, bw.balls))}</span></div>` : ''}
     </section>`;
   }
   function availableCount(st, inn) { return E.availableBatters(st, inn).length; }
@@ -1160,20 +1208,30 @@
     const allPlayers = cfg.teams.flatMap((t, ti) => t.players.map(p => ({ p, ti })));
     const potmOpts = allPlayers.map(({ p, ti }) => `<option value="${esc(p.id)}" ${m.potm === p.id ? 'selected' : ''}>${esc(p.name)} (${esc(cfg.teams[ti].name)})</option>`).join('');
     const resultText = st.result ? st.result.text : (st.status === 'abandoned' ? 'Abandoned' : 'In progress');
-    view().innerHTML = `
-      ${topbar('Scorecard', { back: active && isCurrent ? '#/live' : '#/history' })}
-      <section class="card sc-head">
-        <h2 style="font-size:19px;margin:0">${esc(cfg.name)}</h2>
-        <div class="small muted" style="margin-top:4px">${esc([fmtDate(cfg.date), cfg.venue, `${cfg.overs} overs`, `${cfg.playersPerSide}-a-side`, cfg.ballType].filter(Boolean).join(' · '))}</div>
-        <div class="small muted">${esc(cfg.teams[cfg.toss.winner].name)} won the toss and chose to ${cfg.toss.decision}</div>
-        <div class="res">${active ? '<span class="pill live">In progress</span>' : esc(resultText)}</div>
-      </section>
-      ${active ? `<div class="btn-row" style="margin-bottom:12px"><button class="btn primary lg block" data-act="resume" data-id="${esc(m.id)}">${isCurrent ? 'Back to live scoring' : 'Resume scoring this match'}</button></div>` : ''}
-      ${!active && st.status === 'complete' ? `<section class="card"><h2>Awards</h2><div class="awards">
+    const started = st.innings.filter(i => i.started);
+    // Tabs: one per innings + Summary. Live matches open on the current innings, finished ones on Summary.
+    const short = n => (n.length > 11 ? n.split(/\s+/)[0].slice(0, 11) : n);
+    const tabs = started.map(i => ({ id: 'i' + i.index, label: i.isSuper ? `SO · ${initials(cfg.teams[i.battingTeam].name)}` : short(cfg.teams[i.battingTeam].name) }))
+      .concat([{ id: 'sum', label: 'Summary' }]);
+    if (!app.scTab || app.scTab.id !== m.id || !tabs.some(t => t.id === app.scTab.tab)) {
+      app.scTab = { id: m.id, tab: active && started.length ? 'i' + st.current : 'sum' };
+    }
+    const potmPlayer = m.potm ? allPlayers.find(x => x.p.id === m.potm) : null;
+    const summaryHTML = () => `
+      ${st.status === 'complete' ? `<section class="card"><div class="potm"><div style="flex:1;min-width:0">
+          <div class="lbl2">Player Of The Match</div>
+          <div class="who">${potmPlayer ? esc(potmPlayer.p.name) : '<span class="muted" style="font-weight:500;font-size:17px">Not selected yet</span>'}
+            ${potmPlayer ? `<small>${esc(cfg.teams[potmPlayer.ti].name)}</small>` : ''}</div></div>
+          ${potmPlayer ? flag({ name: potmPlayer.p.name, color: cfg.teams[potmPlayer.ti].color }, 'big') : ''}</div>
+        <label class="field" style="margin:14px 0 0"><span>Choose Player of the Match</span><select id="potm"><option value="">Not selected</option>${potmOpts}</select></label></section>
+        <section class="card"><h2>Awards</h2><div class="awards">
           <div class="award"><span>Best batter</span><b>${aw.bestBatter ? `${esc(aw.bestBatter.name)} ${aw.bestBatter.runs} (${aw.bestBatter.balls})` : '—'}</b></div>
-          <div class="award"><span>Best bowler</span><b>${aw.bestBowler ? `${esc(aw.bestBowler.name)} ${aw.bestBowler.wickets}/${aw.bestBowler.runs}` : '—'}</b></div></div>
-          <label class="field" style="margin:12px 0 0"><span>Player of the Match</span><select id="potm" data-id="${esc(m.id)}"><option value="">Not selected</option>${potmOpts}</select></label></section>` : ''}
-      ${st.innings.filter(i => i.started).map(inn => inningsCardHTML(st, inn)).join('') || '<div class="card empty"><b>No balls bowled yet</b></div>'}
+          <div class="award"><span>Best bowler</span><b>${aw.bestBowler ? `${esc(aw.bestBowler.name)} ${aw.bestBowler.wickets}/${aw.bestBowler.runs}` : '—'}</b></div></div></section>` : ''}
+      <section class="card"><h2>Match info</h2>
+        <div class="kv"><span>Date</span><b>${esc(fmtDate(cfg.date))}</b></div>
+        ${cfg.venue ? `<div class="kv"><span>Venue</span><b>${esc(cfg.venue)}</b></div>` : ''}
+        <div class="kv"><span>Toss</span><b>${esc(cfg.teams[cfg.toss.winner].name)}, chose to ${cfg.toss.decision}</b></div>
+        <div class="kv"><span>Format</span><b>${cfg.overs} overs · ${cfg.playersPerSide}-a-side · ${esc(cfg.ballType)}</b></div></section>
       <section class="card"><h2>Share & export</h2>
         <div class="grid2">
           <button class="btn" data-act="sc-share">📤 Share score</button>
@@ -1184,11 +1242,38 @@
           <button class="btn" data-act="sc-json">💾 Save match file</button>
         </div></section>
       <button class="btn danger block" data-act="sc-delete" style="margin-top:4px">Delete this match</button>`;
-    const potm = $('#potm');
-    if (potm) potm.addEventListener('change', () => {
-      m.potm = potm.value || null;
-      if (saveMeta(m)) { if (app.match && app.match.id === m.id) app.match.potm = m.potm; toast('Player of the Match saved', 'ok'); }
+    const tabBody = () => {
+      if (app.scTab.tab === 'sum') return summaryHTML();
+      const inn = st.innings[+app.scTab.tab.slice(1)];
+      return inn ? inningsCardHTML(st, inn) : '';
+    };
+    const draw = () => {
+      $('#sc-tabs').innerHTML = tabs.map(t => `<button role="tab" aria-selected="${t.id === app.scTab.tab}" class="${t.id === app.scTab.tab ? 'on' : ''}" data-tab="${t.id}">${esc(t.label)}</button>`).join('');
+      $('#sc-body').innerHTML = tabBody();
+      const potm = $('#potm');
+      if (potm) potm.addEventListener('change', () => {
+        m.potm = potm.value || null;
+        if (saveMeta(m)) { if (app.match && app.match.id === m.id) app.match.potm = m.potm; toast('Player of the Match saved', 'ok'); viewScorecard(id); }
+      });
+    };
+    view().innerHTML = `
+      ${topbar('Scorecard', { back: active && isCurrent ? '#/live' : '#/history', sub: cfg.name })}
+      <section class="card">${matchCardHTML(st, {
+        title: active ? 'Live' : (st.status === 'abandoned' ? 'Abandoned' : 'Result'),
+        pill: active ? '<span class="pill live">Live</span>' : '',
+        sub: [`${cfg.overs} overs`, fmtDate(cfg.date), cfg.venue].filter(Boolean).join(' · '),
+        result: active ? null : resultText,
+      })}
+      ${active ? `<button class="btn primary lg block" style="margin-top:14px" data-act="resume" data-id="${esc(m.id)}">${isCurrent ? 'Back to live scoring' : 'Resume scoring this match'}</button>` : ''}</section>
+      <div class="tabs" role="tablist" id="sc-tabs"></div>
+      <div id="sc-body"></div>`;
+    $('#sc-tabs').addEventListener('click', e => {
+      const b = e.target.closest('[data-tab]');
+      if (!b) return;
+      app.scTab.tab = b.dataset.tab;
+      draw();
     });
+    draw();
   }
 
   function inningsCardHTML(st, inn) {
@@ -1200,7 +1285,7 @@
       const b = inn.batters[id];
       const atCrease = !inn.complete && (inn.striker === id || inn.nonStriker === id);
       const how = b.out ? b.howOut : b.retiredHurt ? 'retired hurt' : (atCrease ? 'batting' : 'not out');
-      return `<tr class="${b.out ? '' : 'notout'}"><td><div class="nm">${esc(b.name)}${esc(mark(t, id))}${atCrease && inn.striker === id ? ' *' : ''}</div><div class="how">${esc(how)}</div></td>
+      return `<tr class="${b.out ? '' : 'notout'}"><td><div class="nm">${esc(b.name)}${esc(mark(t, id))}</div><div class="how">${esc(how)}</div></td>
         <td><b>${b.runs}</b></td><td>${b.balls}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${E.strikeRate(b.runs, b.balls).toFixed(1)}</td></tr>`;
     }).join('');
     const dnb = t.players.filter(p => !inn.batters[p.id]).map(p => p.name);
@@ -1216,22 +1301,25 @@
       return `<div class="kv"><span>${p.endWicket ? `${ordinal(p.endWicket)} wkt` : (p.open && !inn.complete ? 'Current' : 'Unbroken')} · ${names}</span><span><b>${p.runs}</b> (${p.balls})</span></div>`;
     }).join('');
     const adj = inn.adjustments.length ? `<div class="hint">Score corrections: ${inn.adjustments.map(a => `${a.runs > 0 ? '+' : ''}${a.runs}${a.note ? ' — ' + esc(a.note) : ''}`).join('; ')}</div>` : '';
-    return `<section class="card">
-      <div class="inn-title"><span class="dot" style="background:${esc(t.color)}"></span><h3>${esc(E.inningsTitle(st, inn))}</h3>
+    const cols = '<colgroup><col class="n"><col class="c2"><col class="c"><col class="c"><col class="c"><col class="c2"></colgroup>';
+    return `<section class="card sc-card">
+      <div class="inn-title">${flag(t, 'sm')}<h3>${esc(E.inningsTitle(st, inn))}</h3>
         <span class="tot">${inn.runs}/${inn.wickets}</span><span class="small muted">(${E.oversStr(inn.legalBalls)})</span></div>
-      ${inn.target != null ? `<div class="small muted">Target ${inn.target}</div>` : ''}
-      <table class="sc" aria-label="${esc(t.name)} batting"><colgroup><col class="n"><col class="c2"><col class="c"><col class="c"><col class="c"><col class="c2"></colgroup>
-        <thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead>
+      ${inn.target != null ? `<div class="small muted pad-x" style="margin:-6px 0 10px">Target ${inn.target}</div>` : ''}
+      <table class="sc" aria-label="${esc(t.name)} batting">${cols}
+        <thead><tr><th>Batsmen</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead>
         <tbody>${batRows}
-          <tr><td>Extras <span class="how">b ${inn.extras.b}, lb ${inn.extras.lb}, wd ${inn.extras.wd}, nb ${inn.extras.nb}${inn.extras.pen ? ', pen ' + inn.extras.pen : ''}</span></td><td><b>${E.extrasTotal(inn)}</b></td><td colspan="4"></td></tr>
+          <tr class="ext"><td>Extras <span class="how">b ${inn.extras.b}, lb ${inn.extras.lb}, wd ${inn.extras.wd}, nb ${inn.extras.nb}${inn.extras.pen ? ', pen ' + inn.extras.pen : ''}</span></td><td><b>${E.extrasTotal(inn)}</b></td><td colspan="4"></td></tr>
           <tr class="tot"><td>Total <span class="how">RR ${fmt2(E.rate(inn.runs, inn.legalBalls))}</span></td><td>${inn.runs}/${inn.wickets}</td><td colspan="4" style="text-align:left;padding-left:8px">${E.oversStr(inn.legalBalls)} ov</td></tr>
         </tbody></table>
-      ${adj}
-      ${dnb.length ? `<div class="fow"><b>${inn.complete ? 'Did not bat' : 'Yet to bat'}:</b> ${dnb.map(esc).join(', ')}</div>` : ''}
-      ${fow ? `<div class="fow" style="margin-top:6px"><b>Fall of wickets:</b> ${fow}</div>` : ''}
-      ${bowlRows ? `<table class="sc" aria-label="${esc(bt.name)} bowling" style="margin-top:12px"><colgroup><col class="n"><col class="c2"><col class="c"><col class="c"><col class="c"><col class="c2"></colgroup>
-        <thead><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th></tr></thead><tbody>${bowlRows}</tbody></table>` : ''}
-      ${parts ? `<div class="lbl section-title" style="margin:10px 0 4px">Partnerships</div>${parts}` : ''}
+      ${bowlRows ? `<table class="sc" aria-label="${esc(bt.name)} bowling">${cols}
+        <thead><tr><th>Bowlers</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Eco</th></tr></thead><tbody>${bowlRows}</tbody></table>` : ''}
+      <div class="pad-x pad-b" style="padding-top:12px">
+        ${adj}
+        ${dnb.length ? `<div class="fow"><b>${inn.complete ? 'Did not bat' : 'Yet to bat'}:</b> ${dnb.map(esc).join(', ')}</div>` : ''}
+        ${fow ? `<div class="fow" style="margin-top:6px"><b>Fall of wickets:</b> ${fow}</div>` : ''}
+        ${parts ? `<h3 style="margin:14px 0 4px">Partnerships</h3>${parts}` : ''}
+      </div>
     </section>`;
   }
   function ordinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
@@ -1242,39 +1330,42 @@
     const c = document.createElement('canvas');
     c.width = 1080; c.height = 1350;
     const g = c.getContext('2d');
-    const bg = g.createLinearGradient(0, 0, 1080, 1350);
-    bg.addColorStop(0, '#173a63'); bg.addColorStop(0.6, '#0b1426'); bg.addColorStop(1, '#0f2b22');
-    g.fillStyle = bg; g.fillRect(0, 0, 1080, 1350);
-    const font = (w, s) => `${w} ${s}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    g.fillStyle = '#eef1f7'; g.fillRect(0, 0, 1080, 1350);
+    g.fillStyle = '#0d47c5'; g.fillRect(0, 0, 1080, 380);
+    const font = (w, s) => `${w} ${s}px Outfit, system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
     const text = (t, x, y, f, color, align) => { g.font = f; g.fillStyle = color; g.textAlign = align || 'left'; g.fillText(t, x, y); };
     const fit = (t, f, max) => { g.font = f; let s = String(t); while (s.length > 3 && g.measureText(s).width > max) s = s.slice(0, -2); return s === String(t) ? s : s + '…'; };
-    text('TURF CRICKET PRO', 72, 100, font(800, 30), '#b6f23b');
-    text(fit(cfg.name, font(800, 54), 936), 72, 170, font(800, 54), '#f3f6fb');
-    text([fmtDate(cfg.date), cfg.venue, `${cfg.overs} overs`].filter(Boolean).join('  ·  '), 72, 220, font(500, 30), '#9aabc8');
-    let y = 290;
+    const card = (x, y, w, h, fill) => {
+      g.save(); g.shadowColor = 'rgba(17,38,92,.12)'; g.shadowBlur = 30; g.shadowOffsetY = 8; g.fillStyle = fill || '#fff';
+      g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, 32); else g.rect(x, y, w, h); g.fill(); g.restore();
+    };
+    text('TURF CRICKET PRO', 72, 100, font(700, 30), '#ffad0d');
+    text(fit(cfg.name, font(700, 54), 936), 72, 170, font(700, 54), '#ffffff');
+    text([fmtDate(cfg.date), cfg.venue, `${cfg.overs} overs`].filter(Boolean).join('  ·  '), 72, 220, font(400, 30), 'rgba(255,255,255,.75)');
+    let y = 280;
     st.innings.filter(i => i.started).slice(0, 4).forEach(inn => {
       const t = cfg.teams[inn.battingTeam];
-      g.fillStyle = 'rgba(20,34,63,.85)';
       const h = inn.isSuper ? 120 : 250;
-      g.beginPath(); if (g.roundRect) g.roundRect(56, y, 968, h, 28); else g.rect(56, y, 968, h); g.fill();
-      g.fillStyle = t.color; g.beginPath(); g.arc(104, y + 62, 14, 0, Math.PI * 2); g.fill();
-      text(fit(E.inningsTitle(st, inn), font(800, 40), 560), 134, y + 76, font(800, 40), '#f3f6fb');
-      text(`${inn.runs}/${inn.wickets}`, 900, y + 82, font(900, 64), '#f3f6fb', 'right');
-      text(`(${E.oversStr(inn.legalBalls)})`, 990, y + 80, font(600, 28), '#9aabc8', 'right');
+      card(56, y, 968, h);
+      g.fillStyle = t.color || '#0d47c5'; g.beginPath(); g.arc(112, y + 62, 26, 0, Math.PI * 2); g.fill();
+      text(initials(t.name), 112, y + 71, font(700, 22), inkFor(t.color), 'center');
+      text(fit(E.inningsTitle(st, inn), font(600, 40), 520), 156, y + 76, font(600, 40), '#1b2236');
+      text(`${inn.runs}/${inn.wickets}`, 900, y + 82, font(700, 64), '#1b2236', 'right');
+      text(`(${E.oversStr(inn.legalBalls)})`, 990, y + 80, font(400, 28), '#7b8499', 'right');
       if (!inn.isSuper) {
+        g.fillStyle = '#f6f8fc'; g.fillRect(56, y + 110, 968, 116);
         const bats = Object.values(inn.batters).sort((a, b) => b.runs - a.runs).slice(0, 2);
         const bowls = Object.values(inn.bowlers).filter(b => b.balls).sort((a, b) => b.wickets - a.wickets || a.runs - b.runs).slice(0, 2);
-        bats.forEach((b, k) => text(fit(`${b.name}  ${b.runs}${b.out ? '' : '*'} (${b.balls})`, font(600, 30), 430), 96, y + 140 + k * 46, font(600, 30), '#dfe7f5'));
-        bowls.forEach((b, k) => text(fit(`${b.name}  ${b.wickets}/${b.runs} (${E.oversShort(b.balls)})`, font(600, 30), 430), 560, y + 140 + k * 46, font(600, 30), '#9aabc8'));
+        bats.forEach((b, k) => text(fit(`${b.name}  ${b.runs}${b.out ? '' : '*'} (${b.balls})`, font(500, 30), 430), 96, y + 158 + k * 46, font(500, 30), '#0d47c5'));
+        bowls.forEach((b, k) => text(fit(`${b.name}  ${b.wickets}/${b.runs} (${E.oversShort(b.balls)})`, font(500, 30), 430), 560, y + 158 + k * 46, font(500, 30), '#7b8499'));
       }
       y += h + 24;
     });
     const res = st.result ? st.result.text : (st.status === 'abandoned' ? 'Match abandoned' : 'Match in progress');
-    g.fillStyle = '#b6f23b';
-    g.beginPath(); if (g.roundRect) g.roundRect(56, y + 6, 968, 110, 28); else g.rect(56, y + 6, 968, 110); g.fill();
-    text(fit(res, font(900, 42), 920), 540, y + 76, font(900, 42), '#0b1426', 'center');
-    if (m.potm && st.names[m.potm]) text(`Player of the Match: ${st.names[m.potm]}`, 540, y + 180, font(700, 34), '#f3f6fb', 'center');
-    text('Scored with Turf Cricket Pro', 540, 1300, font(600, 26), '#6f82a5', 'center');
+    card(56, y + 6, 968, 110, '#0d47c5');
+    text(fit(res, font(700, 42), 920), 540, y + 76, font(700, 42), '#ffffff', 'center');
+    if (m.potm && st.names[m.potm]) text(`Player of the Match: ${st.names[m.potm]}`, 540, y + 180, font(600, 34), '#1b2236', 'center');
+    text('Scored with Turf Cricket Pro', 540, 1300, font(500, 26), '#a3abbd', 'center');
     return new Promise(resolve => c.toBlob(resolve, 'image/png'));
   }
 
@@ -1328,10 +1419,10 @@
   function viewTeams() {
     const teams = store.getTeams().slice().sort((a, b) => a.name.localeCompare(b.name));
     view().innerHTML = `${topbar('My Teams', { sub: 'Saved rosters you can reuse in any match' })}
-      <a class="btn primary block lg" href="#/teams/new" style="margin-bottom:12px">+ Create team</a>
+      <a class="btn light block lg" href="#/teams/new" style="margin-bottom:14px">+ Create team</a>
       ${teams.length ? `<div class="list">${teams.map(t => {
         const r = teamRecord(t.id);
-        return `<a class="list-item" href="#/teams/${encodeURIComponent(t.id)}"><span class="dot" style="background:${esc(t.color || '#b6f23b')};width:14px;height:14px"></span>
+        return `<a class="list-item" href="#/teams/${encodeURIComponent(t.id)}">${flag(t)}
           <div class="grow"><div class="t">${esc(t.name)}</div><div class="s">${plural(t.players.length, 'player')}${r.p ? ` · ${r.w} W, ${r.l} L of ${r.p}` : ''}</div></div><span class="chev" aria-hidden="true">›</span></a>`;
       }).join('')}</div>` : '<div class="card empty"><b>No saved teams</b>Create a team once, then pick it in every new match. Teams typed during match setup are saved here too.</div>'}`;
   }
@@ -1340,7 +1431,7 @@
     const isNew = id === 'new';
     const orig = isNew ? null : store.getTeam(id);
     if (!isNew && !orig) { view().innerHTML = topbar('Team', { back: '#/teams' }) + '<div class="card empty"><b>Team not found</b></div>'; return; }
-    const d = orig ? JSON.parse(JSON.stringify(orig)) : { id: E.uid('t'), name: '', color: '#b6f23b', players: [], captain: null, keeper: null, defaultXI: [], createdAt: Date.now() };
+    const d = orig ? JSON.parse(JSON.stringify(orig)) : { id: E.uid('t'), name: '', color: '#1f9d55', players: [], captain: null, keeper: null, defaultXI: [], createdAt: Date.now() };
     d.defaultXI = d.defaultXI || [];
     app.dirty = false;
 
@@ -1348,7 +1439,7 @@
       view().innerHTML = `${topbar(isNew ? 'New team' : 'Edit team', { back: '#/teams' })}
         <section class="card">
           <div class="row"><label class="field grow"><span>Team name</span><input type="text" id="te-name" maxlength="30" value="${esc(d.name)}" placeholder="e.g. Royal Strikers"></label>
-          <label class="field"><span>Colour</span><input type="color" id="te-color" value="${esc(d.color || '#b6f23b')}" aria-label="Team colour"></label></div>
+          <label class="field"><span>Colour</span><input type="color" id="te-color" value="${esc(d.color || '#1f9d55')}" aria-label="Team colour"></label></div>
         </section>
         <section class="card">
           <h2>Players (${d.players.length})</h2>
@@ -1637,7 +1728,8 @@
   window.addEventListener('beforeunload', e => { if (app.dirty) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('storage', e => { if (e.key && e.key.startsWith('tcp.')) { app.match = null; app.state = null; app.statsCache = null; } });
 
-  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  // Not on localhost, so edits during development are never served from a stale cache.
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
     window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => { /* offline cache unavailable */ }); });
   }
 
