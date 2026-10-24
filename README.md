@@ -22,6 +22,19 @@ A mobile-first live cricket scoring app for friendly turf matches. It's a static
 - **At the ground**: the screen stays on while scoring (Screen Wake Lock, can be turned off in Settings), a coin-flip toss, a projected score in the first innings, and the font is cached for offline use.
 - **Backup**: export or import all data as JSON (Home → ⚙). Use this to move matches to another phone.
 
+## Live sharing (scorer link + watch link)
+
+Once Firebase is connected, the live screen gets a **Share** button:
+
+- **Watch link** (+ QR code): anyone can follow the live score, scorecard and report. Read-only, no app or login needed.
+- **Scorer link**: lets a trusted friend score from their own phone. Every ball syncs to all phones. If two scorers tap at the same moment, the database accepts only one and the other phone is told, so a ball is never counted twice. The owner can make a new scorer link (the old one stops working) or remove a scorer.
+
+How it works: each scoring action is appended to a numbered log in Cloud Firestore (`js/sync.js`). `firestore.rules` only accepts the next number from a joined scorer, keeps the scorer key unreadable, and makes entries permanent (undo is a new entry).
+
+**Setup**: create a Firebase project (free Spark plan), enable Anonymous sign-in and Firestore, add your Pages domain under Authentication → Authorized domains, register a web app, paste its config into `js/firebase-config.js`, then deploy the rules with `npx firebase deploy --only firestore:rules`. Until then the app stays single-phone and hides the Share button.
+
+**Testing locally**: `npm run test:rules` runs the security-rules tests on the Firestore emulator (needs Java 21). To try sharing in the browser, run `npm run emulators`, then in the browser console run `localStorage.setItem('tcp.emulator','1')` on http://localhost:8090 and open a second identity at http://127.0.0.1:8090.
+
 ## File structure
 
 ```
@@ -31,6 +44,9 @@ turf-cricket-pro/
 ├── js/engine.js           Scoring engine: pure, no DOM, runs in browser and Node
 ├── js/storage.js          localStorage persistence (one key per match + index)
 ├── js/app.js              UI: router, screens, dialogs, exports
+├── js/sync.js             Live sharing: Firestore op log, scorer/watch links
+├── js/firebase-config.js  Firebase web config (null = sharing off)
+├── firestore.rules        Database security rules (+ tests/rules.test.mjs)
 ├── sw.js                  Service worker (offline cache)
 ├── manifest.webmanifest   Home-screen install metadata
 ├── icons/                 App icons (SVG + 192/512 PNG)

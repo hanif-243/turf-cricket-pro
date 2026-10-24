@@ -386,5 +386,29 @@ test('photos are stored separately and survive backup export / import', () => {
   b.clearAll(); assert.deepStrictEqual(b.getPhotos(), {});
 });
 
+section('Live sync op log');
+test('diffOp + eventsFromOps reproduce any edit sequence (score, undo, reset)', () => {
+  const Y = require('../js/sync.js');
+  const ev = n => ({ id: 'e' + n, type: 'ball', runs: n % 7 });
+  const ops = [];
+  let cloud = [];
+  const send = next => { const op = Y.diffOp(cloud, next); ops.push({ seq: ops.length, r: op.r, a: op.a }); cloud = next; };
+  send([ev(1), ev(2)]);                       // go live with two balls
+  send([ev(1), ev(2), ev(3)]);                // score
+  send([ev(1), ev(2)]);                       // undo
+  send([ev(1), ev(2), ev(4), ev(5), ev(6)]);  // more balls
+  send([ev(1)]);                              // reset innings
+  send([ev(1), ev(7)]);
+  assert.deepStrictEqual(ops.map(o => [o.r, o.a.length]), [[0, 2], [0, 1], [1, 0], [0, 3], [4, 0], [0, 1]]);
+  const r = Y.eventsFromOps(ops);
+  assert.strictEqual(r.seq, 5);
+  assert.deepStrictEqual(r.events, cloud);
+});
+test('eventsFromOps stops at a gap instead of showing a half-synced log', () => {
+  const Y = require('../js/sync.js');
+  const r = Y.eventsFromOps([{ seq: 0, r: 0, a: [{ id: 'a' }] }, { seq: 2, r: 0, a: [{ id: 'c' }] }]);
+  assert.strictEqual(r.seq, 0); assert.strictEqual(r.events.length, 1);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

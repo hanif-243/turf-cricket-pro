@@ -134,6 +134,7 @@
     more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/></svg>',
     back: '<svg viewBox="0 0 24 24"><path d="M15.5 4 7.5 12l8 8" stroke="currentColor" stroke-width="2.6" fill="none"/></svg>',
     plus: '<svg viewBox="0 0 24 24"><path d="M11 4h2v16h-2zM4 11h16v2H4z"/></svg>',
+    share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.7l6.8-4M8.6 13.3l6.8 4" stroke="currentColor" stroke-width="2" fill="none"/></svg>',
     teams: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.8"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6zM15.5 20c0-2.2-.6-3.9-1.7-5.1.9-.6 2-.9 3.2-.9 2.9 0 4.5 2 4.5 6z"/></svg>',
     history: '<svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5zm3 6v2h8V9zm0 4v2h8v-2zm0 4v2h5v-2z"/></svg>',
     stats: '<svg viewBox="0 0 24 24"><path d="M4 20V11h3.5v9zM10.25 20V5h3.5v15zM16.5 20v-6H20v6z"/></svg>',
@@ -201,7 +202,7 @@
       const prevFocus = document.activeElement;
       const on = opts.on || {};
       const api = { state: opts.state || {}, body, close, render };
-      function render() { body.innerHTML = opts.render(api.state, api); }
+      function render() { body.innerHTML = opts.render(api.state, api); if (opts.afterRender) opts.afterRender(api); }
       function close(value) {
         if (!wrap.isConnected) return;
         wrap.remove();
@@ -222,6 +223,7 @@
       document.addEventListener('keydown', onKey);
       document.body.appendChild(wrap);
       render();
+      if (opts.mounted) opts.mounted(api);
       const first = wrap.querySelector('[autofocus]') || wrap.querySelector('.sheet-body button:not([disabled])');
       if (first) first.focus({ preventScroll: true });
     });
@@ -292,17 +294,21 @@
 
   // Replays the candidate event list; only saves if every event is valid.
   function commit(events) {
+    const before = app.match.events;
     const m = Object.assign({}, app.match, { events, updatedAt: Date.now() });
     let st;
     try { st = E.replay(m); } catch (err) { toast(err.message, 'error'); buzz([50, 40, 50]); return null; }
     m.summary = E.summarize(st);
     try { store.saveMatch(m); } catch (err) { toast(err.message, 'error'); return null; }
     app.match = m; app.state = st; app.statsCache = null;
+    if (m.live) pushLive(SYNC.diffOp(before, events));
     return st;
   }
   function saveMeta(m) {
     m.updatedAt = Date.now();
-    try { store.saveMatch(m); app.statsCache = null; return true; } catch (err) { toast(err.message, 'error'); return false; }
+    try { store.saveMatch(m); app.statsCache = null; } catch (err) { toast(err.message, 'error'); return false; }
+    if (m.live) pushLiveMeta(m);
+    return true;
   }
 
   function addEvent(e) {
@@ -378,6 +384,317 @@
     renderLive();
   }
 
+  // =====================================================================
+  // LIVE SHARING — scorer links, viewer links (see js/sync.js and firestore.rules)
+  // =====================================================================
+  const SYNC = window.TCPSync;
+  const liveEnabled = () => !!(SYNC && SYNC.available());
+  const appUrl = () => location.origin + location.pathname;
+  const viewerUrl = id => `${appUrl()}#/watch/${encodeURIComponent(id)}`;
+  const scorerUrl = (id, key) => `${appUrl()}#/join/${encodeURIComponent(id)}/${encodeURIComponent(key)}`;
+  const sameEvents = (a, b) => a.length === b.length && a.every((e, i) => (e.id || '') === (b[i].id || '') && JSON.stringify(e) === JSON.stringify(b[i]));
+
+  // Photos of everyone in the match (and team logos), so viewers see the same avatars.
+  function matchPhotos(cfg) {
+    const all = photos(), out = {};
+    cfg.teams.forEach(t => {
+      const k = teamPhotoKey(t);
+      if (k && all[k]) out[k] = all[k];
+      t.players.forEach(p => { if (all[p.id]) out[p.id] = all[p.id]; });
+    });
+    return out;
+  }
+
+  // Keeps the current shared match in sync with the cloud log.
+  function ensureLiveSync() {
+    const m = app.match;
+    if (!m || !m.live || !liveEnabled()) { stopLiveSync(); return; }
+    if (app.sync && app.sync.id === m.live.id) return;
+    stopLiveSync();
+    const sync = app.sync = { id: m.live.id, seq: -1, inflight: 0, first: true, status: 'connecting', unsub: null };
+    sync.unsub = SYNC.watch(m.live.id, d => onLiveData(sync, d), err => {
+      sync.status = 'error'; sync.error = err.message; refreshSyncChip();
+    });
+  }
+  function stopLiveSync() { if (app.sync && app.sync.unsub) app.sync.unsub(); app.sync = null; }
+
+  function onLiveData(sync, d) {
+    if (app.sync !== sync || !app.match) return;
+    if (!sync.inflight) sync.seq = d.seq; else sync.seq = Math.max(sync.seq, d.seq);
+    sync.status = d.pending ? (navigator.onLine ? 'sending' : 'offline') : 'synced';
+    const m = app.match;
+    if (sync.first) {
+      sync.first = false;
+      // Balls scored while live sync wasn't running (e.g. reopened offline): send them now.
+      const op = SYNC.diffOp(d.events, m.events);
+      if (op.r === 0 && op.a.length) { pushLive(op); refreshSyncChip(); return; }
+    }
+    const metaChanged = JSON.stringify(d.meta.config) !== JSON.stringify(m.config) || (d.meta.potm || null) !== (m.potm || null) || !!d.meta.paused !== !!m.paused;
+    if (sameEvents(d.events, m.events) && !metaChanged) { refreshSyncChip(); return; }
+    // Another scorer changed the match (or one of our writes was rejected): the cloud log wins.
+    const next = Object.assign({}, m, { config: d.meta.config, events: d.events, potm: d.meta.potm || null, paused: !!d.meta.paused, updatedAt: Date.now() });
+    let st;
+    try { st = E.replay(next); } catch (err) { sync.status = 'error'; sync.error = err.message; refreshSyncChip(); return; }
+    next.summary = E.summarize(st);
+    try { store.saveMatch(next); } catch (err) { /* keep going in memory */ }
+    const grew = d.events.length > m.events.length;
+    app.match = next; app.state = st; app.statsCache = null;
+    if (d.meta.photos) { app.photos = Object.assign({}, store.getPhotos(), d.meta.photos); }
+    if (location.hash.startsWith('#/live')) {
+      renderLive();
+      if (!d.pending) toast(grew ? 'Updated by another scorer' : 'Score updated from the live match');
+    }
+    refreshSyncChip();
+  }
+
+  // Sends one scoring change. If another scorer got there first the server rejects it,
+  // the local copy rolls back to the server's version and the scorer is told.
+  function pushLive(op) {
+    const sync = app.sync;
+    if (!sync || sync.first || !app.match || !app.match.live) return; // first snapshot will reconcile
+    if (!op.r && !op.a.length) return;
+    const seq = sync.seq + 1;
+    sync.seq = seq; sync.inflight++;
+    sync.status = navigator.onLine ? 'sending' : 'offline';
+    refreshSyncChip();
+    SYNC.push(sync.id, seq, op)
+      .catch(err => {
+        if (app.sync !== sync) return;
+        toast(err && err.code === 'permission-denied'
+          ? 'Another scorer recorded a ball at the same moment — your last tap was not saved. Check the score.'
+          : 'Could not sync: ' + (err.message || err), 'error');
+        buzz([80, 40, 80]);
+      })
+      .finally(() => { sync.inflight = Math.max(0, sync.inflight - 1); if (app.sync === sync && !sync.inflight) { sync.status = 'synced'; refreshSyncChip(); } });
+  }
+  function pushLiveMeta(m) {
+    if (!m.live || !liveEnabled()) return;
+    SYNC.updateMeta(m.live.id, { config: m.config, title: m.config.name, potm: m.potm || null, paused: !!m.paused })
+      .catch(err => toast('Could not sync: ' + (err.message || err), 'error'));
+  }
+
+  function syncChipHTML() {
+    const m = app.match;
+    if (!m || !m.live) return '';
+    const s = app.sync ? app.sync.status : 'connecting';
+    const label = { synced: 'Live · synced', sending: 'Live · sending…', offline: 'Offline · will sync', connecting: 'Live · connecting…', error: 'Live · sync error' }[s] || 'Live';
+    return `<span class="sync-chip ${s}" id="sync-chip" role="status">${label}</span>`;
+  }
+  function refreshSyncChip() { const el = $('#sync-chip'); if (el) el.outerHTML = syncChipHTML(); }
+
+  // ---------- QR codes (library loaded on first use) ----------
+  let qrLib = null;
+  function loadQr() {
+    if (window.qrcode) return Promise.resolve(window.qrcode);
+    if (!qrLib) qrLib = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+      s.onload = () => resolve(window.qrcode);
+      s.onerror = () => { qrLib = null; reject(new Error('QR code needs an internet connection')); };
+      document.head.appendChild(s);
+    });
+    return qrLib;
+  }
+  async function fillQr(el, url) {
+    try {
+      const qrcode = await loadQr();
+      const q = qrcode(0, 'M'); q.addData(url); q.make();
+      el.innerHTML = q.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+    } catch (err) { el.innerHTML = `<span class="small muted">${esc(err.message)}</span>`; }
+  }
+
+  async function shareLink(title, url) {
+    if (navigator.share) {
+      try { await navigator.share({ title, text: title, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    await copyText(url);
+    toast('Link copied', 'ok');
+  }
+
+  // The "Share" sheet on the live screen.
+  async function liveShareSheet() {
+    const m = app.match;
+    if (!liveEnabled()) return;
+    if (!m.live) {
+      const go = await sheet({
+        title: 'Share this match live',
+        render: () => `<p class="muted" style="margin-top:0">Going live lets you send two kinds of links:</p>
+          <div class="share-what"><b>👀 Watch link</b><span>Anyone can follow the score live — no app or login needed.</span></div>
+          <div class="share-what"><b>🏏 Scorer link</b><span>Lets a trusted friend score on their phone too. Every ball syncs between phones.</span></div>
+          <label class="field" style="margin-top:12px"><span>Your name (shown to other scorers)</span><input type="text" id="gl-name" maxlength="40" value="${esc(app.settings.scorerName || '')}" placeholder="e.g. Hanif"></label>
+          <div class="sheet-actions"><button class="btn" data-close>Not now</button><button class="btn primary" data-on="go">Go live</button></div>`,
+        on: { go: (el, api) => api.close($('#gl-name', api.body).value.trim() || 'Owner') },
+      });
+      if (!go) return;
+      app.settings.scorerName = go; store.saveSettings(app.settings);
+      toast('Going live…');
+      try {
+        const res = await SYNC.goLive(m, matchPhotos(m.config), go);
+        m.live = { id: res.id, role: 'owner', key: res.key };
+        saveMeta(m);
+        ensureLiveSync();
+        renderLive();
+      } catch (err) {
+        toast(navigator.onLine ? 'Could not go live: ' + (err.message || err) : 'You are offline — connect to the internet to go live.', 'error');
+        return;
+      }
+    }
+    const live = app.match.live;
+    const owner = live.role === 'owner';
+    return sheet({
+      title: 'Share live match',
+      state: { scorers: null },
+      render: s => `
+        <div class="share-block">
+          <div class="share-head"><b>👀 Watch link</b><span class="pill">Anyone</span></div>
+          <p class="small muted">Read-only live score. Share in the WhatsApp group or show the QR at the ground.</p>
+          <div class="qr" id="qr-view" aria-label="QR code for the watch link"></div>
+          <div class="link-box">${esc(viewerUrl(live.id))}</div>
+          <div class="btn-row"><button class="btn" data-on="copy" data-u="v">Copy</button><button class="btn primary" data-on="share" data-u="v">Share</button></div>
+        </div>
+        ${owner ? `<div class="share-block danger-zone">
+          <div class="share-head"><b>🏏 Scorer link</b><span class="pill warn">Trusted only</span></div>
+          <p class="small muted">Whoever opens this can score balls for this match. Send it privately.</p>
+          <div class="link-box">${esc(scorerUrl(live.id, live.key))}</div>
+          <div class="btn-row"><button class="btn" data-on="copy" data-u="s">Copy</button><button class="btn primary" data-on="share" data-u="s">Share</button></div>
+          <button class="btn sm ghost" data-on="rotate" style="margin-top:6px">↻ Make a new scorer link (old one stops working)</button>
+          <div class="lbl">Scorers on this match</div>
+          ${s.scorers == null ? '<p class="small muted">Loading…</p>' : s.scorers.map(x => `<div class="kv"><span>${esc(x.name)}${x.uid === s.me ? ' (you)' : ''}</span>
+            ${x.uid === s.me ? '' : `<button class="btn sm danger" data-on="remove" data-uid="${esc(x.uid)}">Remove</button>`}</div>`).join('') || '<p class="small muted">Only you so far.</p>'}
+        </div>` : '<p class="small muted">You are a scorer on this match. Only the match creator can invite more scorers.</p>'}`,
+      on: {
+        copy: async el => { await copyText(el.dataset.u === 's' ? scorerUrl(live.id, live.key) : viewerUrl(live.id)); toast('Link copied', 'ok'); },
+        share: el => (el.dataset.u === 's'
+          ? shareLink(`Score ${app.match.config.name} with me`, scorerUrl(live.id, live.key))
+          : shareLink(`Watch ${app.match.config.name} live`, viewerUrl(live.id))),
+        rotate: async (el, api) => {
+          if (!await confirmDialog('The current scorer link will stop working for anyone who hasn’t joined yet. People already scoring stay until you remove them.', { title: 'New scorer link?', ok: 'Make new link' })) return;
+          try { live.key = await SYNC.rotateKey(live.id); saveMeta(app.match); api.render(); toast('New scorer link ready', 'ok'); }
+          catch (err) { toast('Could not change the link: ' + (err.message || err), 'error'); }
+        },
+        remove: async (el, api) => {
+          try { await SYNC.removeScorer(live.id, el.dataset.uid); api.state.scorers = api.state.scorers.filter(x => x.uid !== el.dataset.uid); api.render(); toast('Scorer removed'); }
+          catch (err) { toast('Could not remove: ' + (err.message || err), 'error'); }
+        },
+      },
+      afterRender: api => fillQr($('#qr-view', api.body), viewerUrl(live.id)),
+      mounted: api => {
+        if (owner) Promise.all([SYNC.listScorers(live.id), SYNC.uid()]).then(([list, me]) => {
+          api.state.scorers = list; api.state.me = me; api.render();
+        }).catch(() => { api.state.scorers = []; api.render(); });
+      },
+    });
+  }
+
+  // ---------- #/join/<id>/<key>: become a scorer ----------
+  function viewJoin(id, key) {
+    if (!liveEnabled()) { view().innerHTML = topbar('Join as scorer', { back: '#/' }) + '<div class="card empty"><b>Live sharing is not available</b>This copy of the app is not connected to live sharing.</div>'; return; }
+    const local = store.getMatch(id);
+    if (local && local.live && local.live.role !== 'viewer') { store.setCurrentId(id); app.match = null; app.state = null; go('#/live'); return; }
+    view().innerHTML = `${topbar('Join as scorer', { back: '#/' })}
+      <section class="card"><div id="join-match" class="muted">Loading match…</div></section>
+      <section class="card">
+        <p class="muted" style="margin-top:0">You've been invited to score this match. Every ball you record appears on the other scorer's phone and for everyone watching.</p>
+        <label class="field"><span>Your name</span><input type="text" id="join-name" maxlength="40" value="${esc(app.settings.scorerName || '')}" placeholder="e.g. Arjun"></label>
+        <p class="err" id="join-err" role="alert"></p>
+        <button class="btn primary block lg" id="join-go">Join and start scoring</button>
+        <a class="btn ghost block" href="#/watch/${encodeURIComponent(id)}" style="margin-top:8px">Just watch instead</a>
+      </section>`;
+    let first = null;
+    const stop = SYNC.watch(id, d => {
+      first = d;
+      try {
+        const st = E.replay({ config: d.meta.config, events: d.events });
+        const box = $('#join-match');
+        if (box) box.outerHTML = matchCardHTML(st, { title: d.meta.title || 'Live match', pill: '<span class="pill live">Live</span>', sub: d.meta.config.venue || '' });
+      } catch (e) { /* shown on join */ }
+    }, err => { const e = $('#join-err'); if (e) e.textContent = err.message; });
+    app.liveCleanup = stop;
+    $('#join-go').onclick = async () => {
+      const btn = $('#join-go'), err = $('#join-err');
+      const name = $('#join-name').value.trim();
+      if (!name) { err.textContent = 'Enter your name so the other scorer knows who joined.'; return; }
+      btn.disabled = true; btn.textContent = 'Joining…'; err.textContent = '';
+      try {
+        await SYNC.join(id, key, name);
+        app.settings.scorerName = name; store.saveSettings(app.settings);
+        for (let i = 0; i < 50 && !first; i++) await new Promise(r => setTimeout(r, 100));
+        if (!first) throw new Error('Could not load the match. Check your internet and try again.');
+        const now = Date.now();
+        const m = { id, version: 1, config: first.meta.config, events: first.events, potm: first.meta.potm || null, paused: !!first.meta.paused, createdAt: now, updatedAt: now, live: { id, role: 'scorer' } };
+        m.summary = E.summarize(E.replay(m));
+        store.saveMatch(m);
+        Object.entries(first.meta.photos || {}).forEach(([k, v]) => { if (!photos()[k]) app.photos = store.setPhoto(k, v); });
+        store.setCurrentId(id);
+        app.match = m; app.state = null;
+        toast('You are now scoring this match', 'ok');
+        go('#/live');
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Join and start scoring';
+        err.textContent = e && e.code === 'permission-denied'
+          ? 'This scorer link has expired or was replaced. Ask for a new one.'
+          : (navigator.onLine ? (e.message || String(e)) : 'You are offline — connect to the internet to join.');
+      }
+    };
+  }
+
+  // ---------- #/watch/<id>: read-only live score ----------
+  function viewWatch(id) {
+    if (!liveEnabled()) { view().innerHTML = topbar('Live score', { back: '#/' }) + '<div class="card empty"><b>Live sharing is not available</b>This copy of the app is not connected to live sharing.</div>'; return; }
+    view().innerHTML = `${topbar('Live score', { back: '#/' })}<div class="card empty" id="watch-body"><b>Connecting…</b>Loading the live score.</div>`;
+    const w = app.watch = { id, tab: 'live', data: null, at: 0 };
+    const draw = () => {
+      if (app.watch !== w || !w.data || !location.hash.startsWith('#/watch/')) return;
+      const d = w.data;
+      let st;
+      try { st = E.replay({ config: d.meta.config, events: d.events }); } catch (err) { view().innerHTML = errorCard(err.message); return; }
+      app.photos = Object.assign({}, store.getPhotos(), d.meta.photos || {});
+      app.sc = { match: { id, config: d.meta.config, events: d.events, potm: d.meta.potm }, state: st };
+      const inn = st.innings[st.current];
+      const active = isActive(st);
+      const cfg = st.config;
+      const tabs = [['live', 'Live'], ['card', 'Scorecard'], ['rep', 'Report']];
+      let body = '';
+      if (w.tab === 'live') {
+        if (!active) body = `<section class="card result-card"><div class="trophy" aria-hidden="true">${st.result && st.result.tie ? '🤝' : st.status === 'abandoned' ? '⛔' : '🏆'}</div><h2>${esc(st.result ? st.result.text : 'Match over')}</h2></section>`;
+        else if (!inn.started) body = `<section class="card empty"><b>${inn.index ? 'Innings break' : 'Starting soon'}</b>${inn.target ? `${esc(cfg.teams[inn.battingTeam].name)} need ${inn.target} to win.` : 'Waiting for the scorer to pick the openers.'}</section>`;
+        else body = scoreboardHTML(st, inn) + creaseHTML(st, inn) + (d.meta.paused ? '<div class="paused-banner">Match paused</div>' : '');
+      } else if (w.tab === 'card') {
+        body = st.innings.filter(i => i.started).map(i => inningsCardHTML(st, i)).join('') || '<div class="card empty"><b>No balls bowled yet</b></div>';
+      } else body = reportHTML(st);
+      const ago = Math.max(0, Math.round((Date.now() - w.at) / 1000));
+      view().innerHTML = `${topbar(active ? 'Live score' : 'Final score', { back: '#/', sub: cfg.name })}
+        <section class="card">${matchCardHTML(st, {
+          title: active ? 'Live Match' : 'Result', pill: active ? '<span class="pill live">Live</span>' : '',
+          sub: [cfg.venue, `${cfg.overs} overs`].filter(Boolean).join(' · '), result: active ? null : (st.result ? st.result.text : 'Abandoned'),
+        })}<div class="small muted" style="margin-top:8px">${d.fromCache ? '⚠️ Offline — showing the last score received' : `Updates automatically · ${ago < 5 ? 'just now' : ago + 's ago'}`}</div></section>
+        <div class="tabs" role="tablist" id="w-tabs">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${k === w.tab}" class="${k === w.tab ? 'on' : ''}" data-wtab="${k}">${l}</button>`).join('')}</div>
+        <div id="w-body">${body}</div>
+        <p class="center small muted" style="margin-top:16px">Watching on Turf Cricket Pro</p>`;
+      $('#w-tabs').onclick = e => { const b = e.target.closest('[data-wtab]'); if (b) { w.tab = b.dataset.wtab; draw(); } };
+      $('#w-body').onclick = e => {
+        const hit = e.target.closest('[data-ov-tip]');
+        if (hit) { const tip = hit.closest('.chart-card').querySelector('.chart-tip'); if (tip) tip.textContent = hit.dataset.ovTip; }
+      };
+    };
+    const stop = SYNC.watch(id, d => {
+      const prev = w.data;
+      w.data = d; w.at = Date.now();
+      draw();
+      if (prev && d.events.length > prev.events.length) {
+        const e = d.events[d.events.length - 1];
+        if (e.type === 'ball' && e.wicket) flash('OUT!', 'fw');
+        else if (e.type === 'ball' && e.boundary !== false && e.kind === 'normal' && e.runs === 6) flash('SIX!', 'f6');
+        else if (e.type === 'ball' && e.boundary !== false && e.kind === 'normal' && e.runs === 4) flash('FOUR!', 'f4');
+      }
+    }, err => {
+      const b = $('#watch-body') || view();
+      b.innerHTML = `<b>Can't load this match</b>${esc(navigator.onLine ? err.message : 'You are offline — the score will appear when you reconnect.')}`;
+    });
+    const tick = setInterval(() => { if (app.watch === w && w.tab === 'live') draw(); }, 15000);
+    app.liveCleanup = () => { stop(); clearInterval(tick); if (app.watch === w) app.watch = null; app.photos = null; };
+  }
+
   // ---------- router ----------
   const routes = [
     [/^#?\/?$/, () => viewHome()],
@@ -391,8 +708,10 @@
     [/^#\/history$/, () => viewHistory()],
     [/^#\/stats$/, () => viewStats()],
     [/^#\/settings$/, () => viewSettings()],
+    [/^#\/watch\/([^/]+)$/, id => viewWatch(id)],
+    [/^#\/join\/([^/]+)\/([^/]+)$/, (id, key) => viewJoin(id, key)],
   ];
-  const NAV_OF = { '': 'home', new: 'home', edit: 'live', rematch: 'home', live: 'live', match: 'history', teams: 'teams', history: 'history', stats: 'stats', settings: 'home' };
+  const NAV_OF = { '': 'home', new: 'home', edit: 'live', rematch: 'home', live: 'live', match: 'history', teams: 'teams', history: 'history', stats: 'stats', settings: 'home', watch: 'home', join: 'live' };
 
   function route() {
     const h = location.hash || '#/';
@@ -407,6 +726,7 @@
     app.dirty = false;
     const root = view();
     root.onclick = null; root.oninput = null;
+    if (app.liveCleanup) { app.liveCleanup(); app.liveCleanup = null; }
     for (const [re, fn] of routes) {
       const m = h.match(re);
       if (m) {
@@ -428,6 +748,7 @@
       if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     $('.bottom-nav .live-dot').hidden = !liveSummary();
+    ensureLiveSync();
     updateWakeLock();
   }
 
@@ -867,7 +1188,9 @@
     let match;
     try {
       if (S.mode.edit) {
+        const oldEvents = app.match.events;
         match = Object.assign({}, app.match, { config: E.normalizeConfig(input), events: [], updatedAt: Date.now() });
+        if (match.live) { app.match = match; pushLive(SYNC.diffOp(oldEvents, [])); pushLiveMeta(match); }
       } else {
         const live = liveSummary();
         if (live) {
@@ -922,7 +1245,8 @@
 
     view().innerHTML = `<div class="live">
       <div class="live-head">
-        <div class="title"><b>${esc(cfg.name)}</b><span>${esc([innLabel, `${cfg.overs} ov`, cfg.venue].filter(Boolean).join(' · '))}</span></div>
+        <div class="title"><b>${esc(cfg.name)}</b><span>${esc([innLabel, `${cfg.overs} ov`, cfg.venue].filter(Boolean).join(' · '))}</span>${syncChipHTML()}</div>
+        ${liveEnabled() ? `<button class="icon-btn" data-act="share-live" aria-label="Share live: watch and scorer links">${ICON.share}</button>` : ''}
         <button class="icon-btn" data-act="mute" aria-label="${app.settings.sound ? 'Mute sounds' : 'Turn sounds on'}" aria-pressed="${!app.settings.sound}">${app.settings.sound ? ICON.soundOn : ICON.soundOff}</button>
         ${active ? `<button class="icon-btn" data-act="pause" aria-label="${m.paused ? 'Resume match' : 'Pause match'}">${m.paused ? ICON.play : ICON.pause}</button>` : ''}
         <button class="icon-btn" data-act="more" aria-label="More options">${ICON.more}</button>
@@ -2038,6 +2362,7 @@
       addEvent(ev);
     },
     'pick-bowler': el => addEvent({ type: 'set_bowler', bowler: el.dataset.id }),
+    'share-live': () => liveShareSheet(),
     'super-over': async () => {
       const ok = await confirmDialog('Play a one-over Super Over to decide the winner? Each side gets 6 balls and 2 wickets.', { title: 'Super Over', ok: 'Start Super Over' });
       if (ok) addEvent({ type: 'start_super_over' });

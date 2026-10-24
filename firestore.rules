@@ -1,0 +1,85 @@
+rules_version = '2';
+
+// Turf Cricket Pro — shared live matches.
+//
+// matches/{id}               match config + meta (readable by anyone signed in, i.e. any viewer)
+// matches/{id}/ops/{seq}     append-only log of scoring operations; doc id == seq ("0", "1", ...)
+// matches/{id}/meta/head     { seq } of the latest op — lets rules enforce strict ordering
+// matches/{id}/private/key   { key } scorer invite secret — never readable by any client
+// matches/{id}/scorers/{uid} devices allowed to score
+//
+// Ordering: an op batch writes ops/{n} AND moves head from n-1 to n. Ops can never be
+// updated, so if two scorers race for the same n only the first batch commits; the other
+// is rejected and that phone re-syncs. A ball can never be counted twice.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function matchPath(id) { return /databases/$(database)/documents/matches/$(id); }
+    function headPath(id) { return /databases/$(database)/documents/matches/$(id)/meta/head; }
+    function keyPath(id) { return /databases/$(database)/documents/matches/$(id)/private/key; }
+    function opPath(id, seq) { return /databases/$(database)/documents/matches/$(id)/ops/$(string(seq)); }
+    function scorerPath(id, uid) { return /databases/$(database)/documents/matches/$(id)/scorers/$(uid); }
+    function isOwner(id) { return get(matchPath(id)).data.ownerUid == request.auth.uid; }
+    function isOwnerAfter(id) { return getAfter(matchPath(id)).data.ownerUid == request.auth.uid; }
+    function isScorer(id) { return exists(scorerPath(id, request.auth.uid)); }
+    function isScorerAfter(id) { return existsAfter(scorerPath(id, request.auth.uid)); }
+
+    match /matches/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && existsAfter(headPath(id)) && existsAfter(keyPath(id));
+      // scorers may change config (before the first ball / renames), POTM, pause and photos — never the owner
+      allow update: if signedIn() && isScorer(id)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['config', 'potm', 'paused', 'photos', 'updatedAt', 'title']);
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+
+      match /ops/{opId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && isScorerAfter(id)
+          && request.resource.data.seq is int
+          && string(request.resource.data.seq) == opId
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.r is int && request.resource.data.r >= 0
+          && request.resource.data.a is list
+          && getAfter(headPath(id)).data.seq == request.resource.data.seq
+          && (request.resource.data.seq == 0
+                ? !exists(headPath(id))
+                : get(headPath(id)).data.seq == request.resource.data.seq - 1);
+        allow update, delete: if false;
+      }
+
+      match /meta/head {
+        allow read: if signedIn();
+        allow create: if signedIn() && isOwnerAfter(id)
+          && request.resource.data.seq == 0 && existsAfter(opPath(id, 0));
+        allow update: if signedIn() && isScorer(id)
+          && request.resource.data.seq == resource.data.seq + 1
+          && existsAfter(opPath(id, request.resource.data.seq));
+        allow delete: if false;
+      }
+
+      match /private/key {
+        allow read: if false;
+        allow create: if signedIn() && isOwnerAfter(id) && request.resource.data.key is string
+          && request.resource.data.key.size() >= 16;
+        allow update: if signedIn() && isOwner(id) && request.resource.data.key is string
+          && request.resource.data.key.size() >= 16;
+        allow delete: if false;
+      }
+
+      match /scorers/{uid} {
+        allow read: if signedIn();
+        // join: only yourself, and only with the owner's current invite key (or as the owner at go-live)
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.name is string && request.resource.data.name.size() <= 40
+          && (isOwnerAfter(id) || request.resource.data.key == get(keyPath(id)).data.key);
+        allow update: if false;
+        // the owner can remove anyone; a scorer can leave
+        allow delete: if signedIn() && (uid == request.auth.uid || isOwner(id));
+      }
+    }
+  }
+}
